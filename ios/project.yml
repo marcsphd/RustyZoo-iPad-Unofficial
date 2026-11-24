@@ -1,0 +1,35 @@
+name: RustyZoo-iPad
+options:
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  RustyZoo:
+    type: application
+    platform: iOS
+    settings:
+      base:
+        PRODUCT_NAME: RustyZoo
+        PRODUCT_BUNDLE_IDENTIFIER: local.rustyzoo.ipad
+        INFOPLIST_FILE: Info.plist
+        TARGETED_DEVICE_FAMILY: "2"
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: NO
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+        ARCHS: arm64
+        RUSTYZOO_EMBED_GAME_DATA: YES
+    postBuildScripts:
+      - name: Build RustyZoo executable
+        shell: /bin/bash
+        outputFiles:
+          - "$(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)"
+        script: |
+          "${SRCROOT}/build-executable.sh" "${PLATFORM_NAME}" "${TARGET_BUILD_DIR}/${EXECUTABLE_PATH}"
+        basedOnDependencyAnalysis: false
+schemes:
+  RustyZoo:
+    build:
+      targets:
+        RustyZoo: all
+    run:
+      config: Debug

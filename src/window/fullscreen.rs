@@ -13,11 +13,30 @@ pub fn whole(out: (u32, u32), game: (u32, u32)) -> u32 {
     (out.0 / game.0.max(1)).min(out.1 / game.1.max(1))
 }
 
+/// The wide view renders twice this size, using one drawable pixel per sprite pixel.
+#[cfg(any(target_os = "ios", test))]
+pub fn native_game_size((width, height): (u32, u32)) -> Option<(u32, u32)> {
+    (width >= 2 && height >= 2).then_some((width / 2, height / 2))
+}
+
+#[cfg(any(target_os = "ios", test))]
+fn ipad_scale(out: (u32, u32), game: (u32, u32)) -> f32 {
+    if native_game_size(out) == Some(game) {
+        // An odd drawable dimension leaves one border pixel. Keep the other pixels aligned.
+        2.0
+    } else {
+        (out.0 as f32 / game.0.max(1) as f32).min(out.1 as f32 / game.1.max(1) as f32)
+    }
+}
+
 /// Where the picture of `game` pixels goes on an output of `out` pixels: `(x, y, width, height)`.
-/// The factor is [`whole`] when the output is at least as large as the game; a smaller output
-/// scales the picture down to fit.
+/// On desktop the factor is [`whole`] when the game fits. iPad uses 2× for its default viewport
+/// and fits any manual game resolution to the window.
 pub fn fit(out: (u32, u32), game: (u32, u32)) -> (f32, f32, f32, f32) {
     let (gw, gh) = (game.0.max(1), game.1.max(1));
+    #[cfg(target_os = "ios")]
+    let k = ipad_scale(out, game);
+    #[cfg(not(target_os = "ios"))]
     let k = match whole(out, game) {
         0 => (out.0 as f32 / gw as f32).min(out.1 as f32 / gh as f32),
         k => k as f32,
@@ -54,6 +73,19 @@ pub fn pointer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ipad_fullscreen_uses_every_even_drawable_pixel_at_wide_zoom() {
+        for (out, logical) in [
+            ((2732, 2048), (1366, 1024)),
+            ((2752, 2064), (1376, 1032)),
+            ((2733, 2049), (1366, 1024)),
+        ] {
+            assert_eq!(native_game_size(out), Some(logical));
+            assert_eq!(ipad_scale(out, logical), 2.0);
+        }
+        assert_eq!(native_game_size((0, 0)), None);
+    }
 
     #[test]
     fn the_picture_is_scaled_by_a_whole_factor_and_centred() {

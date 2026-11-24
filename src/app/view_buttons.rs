@@ -116,13 +116,12 @@ impl App<'_> {
         } else {
             self.restage();
             if let Some(game) = &self.game {
-                let (x, y) = game.camera.scroll;
                 let target = if self.ui.is_some() {
                     &mut self.map
                 } else {
                     &mut self.frame
                 };
-                game.staged.draw(target, x, y, game.camera.zoom, game.grid);
+                self.zoom_out.draw(game, target, None);
             }
         }
         let image = if shift || self.ui.is_none() {

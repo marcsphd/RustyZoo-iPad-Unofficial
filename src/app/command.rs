@@ -98,6 +98,8 @@ pub enum Mouse {
 pub enum Command {
     /// One key-down message of a scroll key: the direction on each axis, -1, 0 or 1.
     Scroll(i32, i32),
+    /// Move the camera by this many game pixels.
+    Pan(i32, i32),
     /// The pointer is at this position in the window, or has left it (or the window is not
     /// active): the edge scroll of the interface pass reads it.
     Pointer(Option<(i32, i32)>),
@@ -148,6 +150,7 @@ impl fmt::Display for Command {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             Command::Scroll(x, y) => write!(f, "scroll {x} {y}"),
+            Command::Pan(x, y) => write!(f, "pan {x} {y}"),
             Command::Pointer(Some((x, y))) => write!(f, "pointer {x} {y}"),
             Command::Pointer(None) => f.write_str("pointer none"),
             Command::Rotate(cw) => write!(f, "rotate {}", if cw { "cw" } else { "ccw" }),
@@ -205,6 +208,7 @@ impl FromStr for Command {
             ["save", ..] => Command::Save(file("save")?),
             ["load", ..] => Command::Load(file("load")?),
             ["scenario", ..] => Command::Scenario(file("scenario")?),
+            ["pan", x, y] => Command::Pan(number(x)?, number(y)?),
             ["scroll", x, y] => {
                 let (x, y) = (number(x)?, number(y)?);
                 if !(-1..=1).contains(&x) || !(-1..=1).contains(&y) {

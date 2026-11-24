@@ -223,6 +223,20 @@ impl Interface {
         self.dirty = true;
     }
 
+    /// Whether a focused field needs the iPad's on-screen keyboard.
+    #[cfg(target_os = "ios")]
+    pub fn editing_text(&self) -> bool {
+        self.tree
+            .elements
+            .iter()
+            .enumerate()
+            .any(|(index, element)| {
+                matches!(element.kind, Kind::EditableText(_))
+                    && element.state & FOCUSED != 0
+                    && self.visible(index)
+            })
+    }
+
     /// Whether the map view is on the screen and no other element holds the keyboard focus: the
     /// keys of the map view act only then.
     pub(crate) fn map_view_has_the_keys(&self) -> bool {

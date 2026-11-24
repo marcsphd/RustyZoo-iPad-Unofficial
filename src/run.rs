@@ -37,6 +37,9 @@ const DEFAULT_SIZE: (u32, u32) = (1024, 768);
 #[derive(Debug, Default, PartialEq)]
 struct Flags {
     headless: bool,
+    metalfx: bool,
+    /// Double the presentation rate with MetalFX interpolation where possible.
+    frame_generation: bool,
     /// Where a windowed run writes its log.
     log: Option<String>,
     /// `--shot`: where a windowed run writes the pixels the renderer presents.
@@ -93,6 +96,14 @@ fn parse_flags(mut words: &[&str], loose: bool) -> Result<Flags, CliError> {
         words = match (*word, rest) {
             ("--headless", rest) => {
                 flags.headless = true;
+                rest
+            }
+            ("--frame-generation", rest) => {
+                flags.frame_generation = true;
+                rest
+            }
+            ("--metalfx", rest) => {
+                flags.metalfx = true;
                 rest
             }
             ("--bare", rest) => {
@@ -208,6 +219,8 @@ fn parse_flags(mut words: &[&str], loose: bool) -> Result<Flags, CliError> {
         true => {
             flags.log.is_none()
                 && flags.shot.is_none()
+                && !flags.metalfx
+                && !flags.frame_generation
                 && (scripted != flags.replay.is_some())
                 && (scripted || replayed)
         }
@@ -391,6 +404,8 @@ fn window_flags<'a>(
     crate::window::Flags {
         open,
         size: flags.size,
+        metalfx: flags.metalfx || flags.frame_generation,
+        frame_generation: flags.frame_generation,
         log: flags.log.as_deref(),
         passes: flags.passes,
         script,

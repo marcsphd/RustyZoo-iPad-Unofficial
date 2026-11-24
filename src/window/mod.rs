@@ -16,9 +16,12 @@ mod cursor;
 mod events;
 mod fullscreen;
 mod intro;
+#[cfg(target_os = "macos")]
+mod metalfx;
 mod screen;
 mod size;
 mod sound;
+mod touch;
 mod wait;
 
 use std::cell::{Cell, RefCell};
@@ -60,6 +63,9 @@ pub struct Flags<'a> {
     pub open: Option<&'a str>,
     /// `--size`: the game size, instead of the ini file's, and not clamped.
     pub size: Option<(u32, u32)>,
+    /// `--metalfx`: upscale with Apple's spatial scaler when available.
+    pub metalfx: bool,
+    pub frame_generation: bool,
     /// `--log`: where to write the lines a headless run prints.
     pub log: Option<&'a str>,
     /// `--passes`: stop after this many passes; else the player closes the window.
@@ -104,15 +110,23 @@ fn resize<'t>(
     textures: &'t sdl3::render::TextureCreator<sdl3::video::WindowContext>,
     want: (u32, u32),
 ) -> Option<Texture<'t>> {
-    let mut texture = match textures.create_texture_streaming(PixelFormat::RGBA32, want.0, want.1) {
+    let texture = match scene_texture(textures, want) {
         Ok(texture) => texture,
         Err(e) => {
             eprintln!("rustyzoo: cannot resize to {}x{}: {e}", want.0, want.1);
             return None;
         }
     };
-    texture.set_scale_mode(ScaleMode::Nearest);
     screen.resize(video, want).then_some(texture)
+}
+
+fn scene_texture(
+    textures: &sdl3::render::TextureCreator<sdl3::video::WindowContext>,
+    size: (u32, u32),
+) -> Result<Texture<'_>, sdl3::render::TextureValueError> {
+    let mut texture = textures.create_texture_streaming(PixelFormat::RGBA32, size.0, size.1)?;
+    texture.set_scale_mode(ScaleMode::Nearest);
+    Ok(texture)
 }
 
 /// Writes the mode into the settings of the user folder (`[user] fullscreen`), which the next
@@ -355,11 +369,16 @@ fn drop_start_input(pump: &mut EventPump, state: &mut State, commands: &mut Vec<
         state.note(event, commands);
     }
     state.mouse.clear();
+    state.contacts.clear();
     commands.retain(|c| matches!(c, Command::Quit | Command::Close | Command::Fullscreen(_)));
 }
 
 /// Shows the texture in the window.
-fn present(screen: &mut Screen, texture: &Texture) -> Result<(), CliError> {
+fn present(screen: &mut Screen, texture: &mut Texture, interpolate: bool) -> Result<(), CliError> {
+    if screen.present_metalfx(None, interpolate)? {
+        return Ok(());
+    }
+    screen.upload_fallback(texture)?;
     screen.copy(texture)?;
     if !screen.canvas.present() {
         return Err(sdl3::get_error().into());
@@ -368,7 +387,20 @@ fn present(screen: &mut Screen, texture: &Texture) -> Result<(), CliError> {
 }
 
 /// Writes the pixels of the last frame, as the renderer has them, to the PNG `file` (`--shot`).
-fn shot(screen: &mut Screen, texture: &Texture, file: &str) -> Result<(), CliError> {
+fn shot(screen: &mut Screen, texture: &mut Texture, file: &str) -> Result<(), CliError> {
+    #[cfg(target_os = "macos")]
+    if screen.metalfx_active() {
+        let (w, h) = screen.canvas.output_size()?;
+        let mut frame = rustyzoo::Framebuffer::new(w, h);
+        if screen.present_metalfx(Some(&mut frame), false)? {
+            for pixel in frame.pixels.chunks_exact_mut(4) {
+                pixel.swap(0, 2); // Metal's drawable is BGRA.
+                pixel[3] = 255;
+            }
+            return probe::write_shot(&frame, file);
+        }
+    }
+    screen.upload_fallback(texture)?;
     // The texture goes to the renderer again, and its pixels are read before the present.
     screen.copy(texture)?;
     probe::shot(&screen.canvas, file)?;
@@ -385,11 +417,18 @@ pub fn run(
 ) -> Result<(), CliError> {
     let sdl = sdl3::init()?;
     let video = sdl.video()?;
-    let mut screen = screen::open(&video, ini, flags.size)?;
-    let mut size = screen.size;
+    let mut screen = screen::open(
+        &video,
+        ini,
+        flags.size,
+        flags.metalfx,
+        flags.frame_generation,
+    )?;
+    let size = screen.size;
     let textures = screen.canvas.texture_creator();
-    let mut texture = textures.create_texture_streaming(PixelFormat::RGBA32, size.0, size.1)?;
-    texture.set_scale_mode(ScaleMode::Nearest);
+    let mut texture = scene_texture(&textures, size)?;
+    let mut wide_texture: Option<Texture> = None;
+    let mut showing_wide = false;
 
     // The busy cursor shows from the start-up until the first pass.
     let cursors = Rc::new(RefCell::new(Cursors::new(vfs.root())));
@@ -456,7 +495,7 @@ pub fn run(
         ..State::default()
     };
     let seen_alternate = show_busy(&mut app, &cursors, alternate);
-    if state.interface {
+    if state.interface && !cfg!(target_os = "ios") {
         // The window gets typed characters as text input events.
         // SAFETY: the window is open and owned by `screen` for the whole run.
         unsafe { sdl3::sys::keyboard::SDL_StartTextInput(screen.canvas.window().raw()) };
@@ -472,20 +511,39 @@ pub fn run(
     let mut pointer = None;
     // The dummy driver has no pointer and reports one in the corner, which would scroll the view;
     // a script moves its own pointer, and a real one at the edge would scroll the view under it.
-    let has_pointer = !scripted && video.current_video_driver() != "dummy";
+    let has_pointer =
+        !scripted && !cfg!(target_os = "ios") && video.current_video_driver() != "dummy";
+    #[cfg(target_os = "ios")]
+    let mut showing_keyboard = false;
     let mut wait = Wait::default();
     let mut seen = false;
     loop {
         while let Some(event) = pump.poll_event() {
             state.note(event, &mut commands);
         }
+        #[cfg(target_os = "ios")]
+        if screen.native_viewport
+            && let Some(size) = fullscreen::native_game_size(screen.canvas.output_size()?)
+            && size != screen.size
+        {
+            texture = scene_texture(&textures, size)?;
+            screen.size = size;
+            app.set_viewport_size(size);
+            state.exposed = true;
+        }
         state.mouse_commands(|at| screen.pointer(at), &mut commands)?;
+        let (width, height) = screen.canvas.window().size();
+        for contact in take(&mut state.contacts) {
+            let (x, y) = contact.position;
+            let at = screen.pointer((x * width as f32, y * height as f32))?;
+            state.touch.handle(contact, at, &mut commands);
+        }
         // Without the focus the sound is silent, the voices running on.
         sound.focus(focused(screen.canvas.window().window_flags().into()));
         // Minimised or hidden: nothing runs until something happens (a close request still
         // does). The music runs on silently, the output being muted with the focus, and is heard
         // where it has got to at the restore.
-        if asleep(screen.canvas.window().window_flags().into())
+        if (state.backgrounded || asleep(screen.canvas.window().window_flags().into()))
             && !commands
                 .iter()
                 .any(|c| matches!(c, Command::Quit | Command::Close))
@@ -502,12 +560,18 @@ pub fn run(
             let made = resize(&mut screen, &video, &textures, want);
             let ok = made.is_some();
             if let Some(new) = made {
-                (texture, size) = (new, want);
+                texture = new;
                 state.exposed = true;
+                #[cfg(target_os = "ios")]
+                {
+                    screen.native_viewport = false;
+                }
             }
             app.resized(want, ok);
         }
         screen.refit(&video);
+        #[cfg(target_os = "ios")]
+        app.set_wide_output(fullscreen::whole(screen.canvas.output_size()?, screen.size) >= 2);
         app.set_display(screen::desktop(&video));
         run_script(&mut script, pass, &mut screen, &mut state, &mut commands);
         if has_pointer {
@@ -521,17 +585,49 @@ pub fn run(
         let now = sdl3::timer::ticks() - start;
         let painted = match app.pass(now, &commands) {
             Some(frame) => {
-                texture.update(None, &frame.pixels, size.0 as usize * 4)?;
+                showing_wide = (frame.width, frame.height) != screen.size;
+                if showing_wide
+                    && wide_texture.as_ref().is_none_or(|texture| {
+                        let info = texture.query();
+                        (info.width, info.height) != (frame.width, frame.height)
+                    })
+                {
+                    wide_texture = Some(scene_texture(&textures, (frame.width, frame.height))?);
+                }
+                let active = wide_texture
+                    .as_mut()
+                    .filter(|_| showing_wide)
+                    .unwrap_or(&mut texture);
+                screen.update(active, frame)?;
                 true
             }
             None => false,
         };
         commands.clear();
+        #[cfg(target_os = "ios")]
+        {
+            let editing = app.interface().is_some_and(|ui| ui.editing_text());
+            if editing != showing_keyboard {
+                // SAFETY: the live window is owned by screen throughout this loop.
+                showing_keyboard = unsafe {
+                    if editing {
+                        sdl3::sys::keyboard::SDL_StartTextInput(screen.canvas.window().raw())
+                    } else {
+                        sdl3::sys::keyboard::SDL_StopTextInput(screen.canvas.window().raw());
+                        false
+                    }
+                };
+            }
+        }
         // A button of the options window may have switched them too.
         state.alternate = app.alternate_cursors();
         shown |= painted;
         if painted || (shown && std::mem::take(&mut state.exposed)) {
-            present(&mut screen, &texture)?;
+            let active = wide_texture
+                .as_mut()
+                .filter(|_| showing_wide)
+                .unwrap_or(&mut texture);
+            present(&mut screen, active, painted && app.in_zoo())?;
         }
         (cursors.borrow_mut()).show(rustyzoo::cursor::number(app.cursor(), state.alternate));
         sound_and_log(&mut sound, vfs, &app, &mut log, (pass, now))?;
@@ -546,7 +642,11 @@ pub fn run(
     }
     sound.summary(&app);
     if let Some(file) = flags.shot {
-        shot(&mut screen, &texture, file)?;
+        let active = wide_texture
+            .as_mut()
+            .filter(|_| showing_wide)
+            .unwrap_or(&mut texture);
+        shot(&mut screen, active, file)?;
     }
     Ok(())
 }

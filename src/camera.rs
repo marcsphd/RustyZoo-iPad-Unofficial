@@ -230,7 +230,7 @@ impl Camera {
     }
 
     /// A scroll by (0, 0) does nothing, not even the range check (6.1).
-    fn scroll_by(&mut self, map: &Zoo, dx: i32, dy: i32) {
+    pub(crate) fn scroll_by(&mut self, map: &Zoo, dx: i32, dy: i32) {
         if (dx, dy) == (0, 0) {
             return;
         }

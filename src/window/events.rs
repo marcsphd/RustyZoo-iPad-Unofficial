@@ -6,6 +6,7 @@ use sdl3::event::{Event, WindowEvent};
 use sdl3::mouse::MouseButton;
 use sdl3::video::WindowFlags;
 
+use super::touch::{Contact, Touch};
 use crate::input;
 
 /// Whether the window is hidden or minimised, or full screen without the focus (main loop 3.2),
@@ -55,6 +56,9 @@ pub struct State {
     pub interface: bool,
     /// The mouse messages of the left button, the right button's release, the pointer and the wheel, in order.
     pub mouse: Vec<Raw>,
+    pub contacts: Vec<Contact>,
+    pub touch: Touch,
+    pub backgrounded: bool,
     /// A script drives the run: the real mouse is ignored, as a headless run has none (its
     /// moves and clicks would land between the script's `mouse` and `down`).
     pub scripted: bool,
@@ -63,6 +67,12 @@ pub struct State {
 impl State {
     /// Turns an event into a command or a change of state.
     pub fn note(&mut self, event: Event, commands: &mut Vec<Command>) {
+        if self.interface
+            && !self.scripted
+            && let Some(contact) = Contact::event(&event)
+        {
+            self.contacts.push(contact);
+        }
         if let Some(command) = input::command(&event) {
             commands.push(command);
         }
@@ -107,6 +117,15 @@ impl State {
             }
         }
         match event {
+            Event::AppWillEnterBackground { .. } => {
+                self.backgrounded = true;
+                self.contacts.clear();
+                self.touch.cancel(commands);
+            }
+            Event::AppDidEnterForeground { .. } => {
+                self.backgrounded = false;
+                self.exposed = true;
+            }
             Event::Quit { .. }
             | Event::Window {
                 win_event: WindowEvent::CloseRequested,

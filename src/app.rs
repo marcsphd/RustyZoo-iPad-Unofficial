@@ -244,6 +244,7 @@ pub struct App<'a> {
     /// The map as the staged picture draws it for `painted`, when there is an interface: the map
     /// view copies it, so a frame painted for the interface alone draws no map again.
     map: Framebuffer,
+    zoom_out: zoom_out::ZoomOut,
     /// The look of the map in `map` (`frame` without an interface); `None` before the first.
     painted: Option<Look>,
     /// The rectangles of the map that a staging changed since it was painted for `painted`
@@ -409,9 +410,14 @@ impl<'a> App<'a> {
             Err(why) => eprintln!("rustyzoo: warning: economy.cfg: {why}; built-in settings used"),
         }
         let options = options::Options::new(renderer.vfs().ini());
-        let last_file = Config::parse(renderer.vfs().ini())
-            .ok()
-            .and_then(|ini| menu::last_path(&ini, renderer.vfs().root()));
+        let ini = Config::parse(renderer.vfs().ini()).ok();
+        let last_file = ini
+            .as_ref()
+            .and_then(|ini| menu::last_path(ini, renderer.vfs().root()));
+        let smooth_zoom_out = ini
+            .as_ref()
+            .and_then(|ini| crate::timing::ini_whole(ini, "RustyZoo", "smoothZoomOut"))
+            .is_some_and(|value| value != 0);
         Ok(App {
             renderer,
             game: None,
@@ -430,6 +436,7 @@ impl<'a> App<'a> {
             frame: Framebuffer::new(size.0, size.1),
             ui: None,
             map: Framebuffer::new(0, 0),
+            zoom_out: zoom_out::ZoomOut::new(smooth_zoom_out),
             painted: None,
             stale: None,
             applied: Vec::new(),
@@ -713,6 +720,7 @@ mod minimap_bar;
 mod options;
 mod paint;
 mod view_buttons;
+mod zoom_out;
 pub use paint::{frame_hash, frame_hashes};
 #[cfg(test)]
 mod cheat_staff_tests;

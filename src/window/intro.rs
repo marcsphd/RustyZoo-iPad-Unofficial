@@ -1,5 +1,5 @@
 //! The intro movies of a windowed run (main menu 3.2): before the start-up picture, in the
-//! window, with their sound; a key press or a left or right button press stops the movie that
+//! window, with their sound; a tap, key press, or left or right button press stops the movie that
 //! plays and the next one follows; closing the window ends the program. In full screen the
 //! pointer is hidden meanwhile.
 
@@ -27,7 +27,7 @@ use crate::CliError;
 #[derive(Debug, PartialEq)]
 enum Reaction {
     Nothing,
-    /// Stop the movie: a key press, or a left or right button press.
+    /// Stop the movie on touch, key press, or left or right button press.
     Skip,
     /// The window was asked to close.
     Quit,
@@ -37,7 +37,8 @@ enum Reaction {
 
 fn react(event: &Event) -> Reaction {
     match event {
-        Event::KeyDown { .. }
+        Event::FingerDown { .. }
+        | Event::KeyDown { .. }
         | Event::MouseButtonDown {
             mouse_btn: MouseButton::Left | MouseButton::Right,
             ..
@@ -71,12 +72,8 @@ pub fn show(
     texture: &mut Texture,
     frame: &Framebuffer,
 ) -> Result<(), CliError> {
-    texture.update(None, &frame.pixels, frame.width as usize * 4)?;
-    screen.copy(texture)?;
-    match screen.canvas.present() {
-        true => Ok(()),
-        false => Err(sdl3::get_error().into()),
-    }
+    screen.update(texture, frame)?;
+    super::present(screen, texture, false)
 }
 
 /// Plays the movies the settings ask for. Writes to the log the lines a headless run prints

@@ -70,6 +70,7 @@ fn folder(
     let base = match os {
         "windows" => var("APPDATA")?,
         "macos" => var("HOME")?.join("Library/Application Support"),
+        "ios" => return Some(var("HOME")?.join("Documents")),
         // The base directory specification ignores a relative path.
         _ => var(xdg)
             .filter(|dir| dir.is_absolute())

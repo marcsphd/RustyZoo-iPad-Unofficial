@@ -1,4 +1,10 @@
-<div align="center">
+# RustyZoo iPad (Unofficial)
+
+An independent iPad port of [RustyZoo](https://github.com/RustyZoo/RustyZoo), unaffiliated with the upstream maintainers. The port adds touch controls, pinch-to-zoom, and tap-to-skip intro videos.
+
+See the [iPad build and setup instructions](ios/README.md). Bring your own copy of the game data.
+
+## About upstream RustyZoo
 
 # RustyZoo
 

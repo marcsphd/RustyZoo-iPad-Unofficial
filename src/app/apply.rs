@@ -44,6 +44,9 @@ impl App<'_> {
             (Command::Scroll(x, y), Some(game)) if keys && !following => {
                 game.camera.key_scroll(&game.world.zoo, (x, y));
             }
+            (Command::Pan(x, y), Some(game)) if keys && !following => {
+                game.camera.scroll_by(&game.world.zoo, x, y);
+            }
             (Command::Rotate(cw), Some(_)) if keys => {
                 self.hotkey(if cw { ROTATE_CW } else { ROTATE_CCW })
             }

@@ -30,17 +30,24 @@ pub fn shot(canvas: &Canvas<Window>, file: &str) -> Result<(), CliError> {
             .flat_map(|r| r[..row].iter().copied())
             .collect()
     });
+    write_shot(
+        &Framebuffer {
+            width,
+            height,
+            pixels,
+        },
+        file,
+    )
+}
+
+pub fn write_shot(frame: &Framebuffer, file: &str) -> Result<(), CliError> {
+    let Framebuffer { width, height, .. } = frame;
     let out = File::create(file).map_err(|e| format!("{file}: {e}"))?;
-    let frame = Framebuffer {
-        width,
-        height,
-        pixels,
-    };
-    write_png(&frame, BufWriter::new(out))?;
+    write_png(frame, BufWriter::new(out))?;
     let colours = frame.pixels.chunks(4).collect::<HashSet<_>>().len();
     println!(
         "shot {width}x{height} colours {colours} hash {:016x}",
-        frame_hash(&frame)
+        frame_hash(frame)
     );
     match colours {
         0..=1 => Err("the picture read back is blank".into()),

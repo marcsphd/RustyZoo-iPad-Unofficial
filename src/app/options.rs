@@ -337,7 +337,16 @@ impl App<'_> {
         if self.quit {
             self.put("UI", "userAttenuation", self.options.global, Some(0));
         }
-        drew.then_some(&self.frame)
+        drew.then(|| {
+            self.zoom_out
+                .presented(self.game.is_some())
+                .unwrap_or(&self.frame)
+        })
+    }
+
+    /// Whether the frame contains a live zoo. Menus and loading screens need no interpolation.
+    pub fn in_zoo(&self) -> bool {
+        self.game.is_some()
     }
 
     /// The desktop of the display, as the shell sees it (16.3).
@@ -482,6 +491,11 @@ impl App<'_> {
         }
         self.put("user", "screenwidth", size.0 as i32, None);
         self.put("user", "screenheight", size.1 as i32, None);
+        self.set_viewport_size(size);
+    }
+
+    /// Updates the viewport in response to a window change without storing a video preference.
+    pub fn set_viewport_size(&mut self, size: (u32, u32)) {
         // The surface is made again at the new size, cleared (inferred), and the whole screen is
         // drawn again at the next pass (inferred).
         (self.frame, self.painted, self.stale) = (Framebuffer::new(size.0, size.1), None, None);

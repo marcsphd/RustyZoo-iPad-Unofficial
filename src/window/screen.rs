@@ -1,12 +1,14 @@
 //! The window and its renderer: the game size, the factor of the display scale, the lines that
 //! tell how they came out.
 
-use rustyzoo::config::Config;
+use rustyzoo::{Framebuffer, config::Config};
 use sdl3::pixels::Color;
 use sdl3::render::{Canvas, FRect, Texture};
 use sdl3::video::{Window, WindowPos};
 
 use super::fullscreen;
+#[cfg(target_os = "macos")]
+use super::metalfx::{Present, Scaler};
 use super::size::{clamp, ini_size, plan};
 use crate::CliError;
 
@@ -15,11 +17,19 @@ pub struct Screen {
     pub canvas: Canvas<Window>,
     /// The game size, not the window's.
     pub size: (u32, u32),
+    #[cfg(target_os = "ios")]
+    pub native_viewport: bool,
     /// The game is full screen (the camera's rules apply). It follows the last switch that the
     /// window accepted, and what the window reports on its own.
     pub fullscreen: bool,
     /// The window waits for a fit to the game size.
     fit: Fit,
+    #[cfg(target_os = "macos")]
+    scaler: Option<Scaler>,
+    #[cfg(target_os = "macos")]
+    frame: Option<Framebuffer>,
+    #[cfg(target_os = "macos")]
+    upload_pending: bool,
 }
 
 /// When the window is fitted to the game size: at once in a window, and when a full screen is
@@ -43,6 +53,77 @@ impl Fit {
 }
 
 impl Screen {
+    pub fn update(&mut self, texture: &mut Texture, frame: &Framebuffer) -> Result<(), CliError> {
+        #[cfg(target_os = "macos")]
+        if self.scaler.is_some() {
+            if let Some(cached) = &mut self.frame {
+                cached.width = frame.width;
+                cached.height = frame.height;
+                cached.pixels.clone_from(&frame.pixels);
+            } else {
+                self.frame = Some(Framebuffer {
+                    width: frame.width,
+                    height: frame.height,
+                    pixels: frame.pixels.clone(),
+                });
+            }
+            self.upload_pending = true;
+            return Ok(());
+        }
+
+        Ok(texture.update(None, &frame.pixels, frame.width as usize * 4)?)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn metalfx_active(&self) -> bool {
+        self.scaler.is_some()
+    }
+
+    /// Returns true when MetalFX handled the present, even if a drawable was unavailable.
+    pub fn present_metalfx(
+        &mut self,
+        capture: Option<&mut Framebuffer>,
+        interpolate: bool,
+    ) -> Result<bool, CliError> {
+        #[cfg(target_os = "macos")]
+        if let (Some(scaler), Some(frame)) = (&mut self.scaler, &self.frame)
+            && (frame.width, frame.height) == self.size
+        {
+            let rect = fullscreen::fit(self.canvas.output_size()?, self.size);
+            if rect.2 >= self.size.0 as f32 && rect.3 >= self.size.1 as f32 {
+                let capturing = capture.is_some();
+                match scaler.present(frame, rect, capture, interpolate) {
+                    Present::Drawn => return Ok(true),
+                    Present::Unavailable => return Ok(!capturing),
+                    Present::Failed => {
+                        eprintln!("rustyzoo: MetalFX failed; using nearest-neighbor scaling");
+                        self.scaler = None;
+                    }
+                }
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = (capture, interpolate);
+        Ok(false)
+    }
+
+    pub fn upload_fallback(&mut self, texture: &mut Texture) -> Result<(), CliError> {
+        #[cfg(target_os = "macos")]
+        if self.upload_pending
+            && let Some(frame) = &self.frame
+            && (frame.width, frame.height) == self.size
+        {
+            texture.update(None, &frame.pixels, frame.width as usize * 4)?;
+            self.upload_pending = false;
+            if self.scaler.is_none() {
+                self.frame = None;
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = texture;
+        Ok(())
+    }
+
     /// Copies the game picture to the window, scaled by a whole factor and centred on black
     /// (see [`fullscreen::fit`]); at the size the window opens with, it fills the window.
     pub fn copy(&mut self, texture: &Texture) -> Result<(), CliError> {
@@ -136,6 +217,8 @@ pub fn open(
     video: &sdl3::VideoSubsystem,
     ini: &Config,
     size: Option<(u32, u32)>,
+    metalfx: bool,
+    frame_generation: bool,
 ) -> Result<Screen, CliError> {
     let display = video.get_primary_display()?;
     let usable = display.get_usable_bounds()?;
@@ -143,24 +226,32 @@ pub fn open(
     // The scale of the display, before there is a window: its content scale and pixel density.
     let density = display.get_mode().map_or(1.0, |m| m.pixel_density);
     let scale = display.get_content_scale().unwrap_or(1.0) * density;
+    #[cfg(target_os = "ios")]
+    let native_viewport = size.is_none();
     // `--size` is not cut, but the factor still gives way when the window does not fit.
     let size = size.unwrap_or_else(|| {
         let pixels = |n: u32| (n as f32 * density) as u32;
         clamp(ini_size(ini), (pixels(usable.0), pixels(usable.1)))
     });
     let (k, want) = plan(size, scale, density, usable);
-    let window = video
-        .window("RustyZoo", want.0, want.1)
-        .high_pixel_density()
-        // The maximise button, which goes to full screen, needs a resizable window.
-        .resizable()
-        .build()?;
+    let mut window = video.window("RustyZoo", want.0, want.1);
+    window.high_pixel_density();
+    #[cfg(target_os = "ios")]
+    window.fullscreen();
+    #[cfg(not(target_os = "ios"))]
+    window.resizable();
+    let window = window.build()?;
     // The game keeps its size; the window may come out another size.
     let points = window.size();
     let pixels = window.size_in_pixels();
     let (scale, density) = (window.display_scale(), window.pixel_density());
     let canvas = sdl3::render::create_renderer(window, None)?;
     let output = canvas.output_size()?;
+    #[cfg(target_os = "ios")]
+    let (size, k) = match fullscreen::native_game_size(output).filter(|_| native_viewport) {
+        Some(size) => (size, 2),
+        None => (size, k),
+    };
     println!("game {}x{} factor {k}", size.0, size.1);
     println!(
         "window {}x{} pixels {}x{} output {}x{}",
@@ -176,9 +267,30 @@ pub fn open(
     if fullscreen::whole(pixels, size) != k {
         eprintln!("rustyzoo: the window has {pixels:?} pixels, not the game size times {k}");
     }
+    #[cfg(target_os = "macos")]
+    let scaler = metalfx
+        .then(|| Scaler::new(&canvas, frame_generation))
+        .flatten();
+    #[cfg(not(target_os = "macos"))]
+    let _ = frame_generation;
+    #[cfg(target_os = "macos")]
+    let supported = scaler.is_some();
+    #[cfg(not(target_os = "macos"))]
+    let supported = false;
+    if metalfx && !supported {
+        eprintln!("rustyzoo: MetalFX is unavailable; using nearest-neighbor scaling");
+    }
     Ok(Screen {
+        #[cfg(target_os = "macos")]
+        scaler,
+        #[cfg(target_os = "macos")]
+        frame: None,
+        #[cfg(target_os = "macos")]
+        upload_pending: false,
         canvas,
         size,
+        #[cfg(target_os = "ios")]
+        native_viewport,
         fullscreen: false,
         fit: Fit::default(),
     })

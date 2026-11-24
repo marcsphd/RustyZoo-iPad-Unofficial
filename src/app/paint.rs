@@ -4,6 +4,14 @@
 use super::*;
 
 impl App<'_> {
+    /// Allow the window to present all four samples of each logical wide-view pixel.
+    pub fn set_wide_output(&mut self, fits: bool) {
+        if self.zoom_out.present_at_full_size != fits {
+            self.zoom_out.present_at_full_size = fits;
+            self.painted = None;
+        }
+    }
+
     /// Paints the window of the view if it differs from the last frame: the camera moved or the
     /// interface changed.
     pub(super) fn paint(&mut self) -> bool {
@@ -21,37 +29,25 @@ impl App<'_> {
         if let Some(game) = &self.game
             && (moved || stale.is_some())
         {
-            let (x, y) = game.camera.scroll;
-            match moved {
-                true => game.staged.draw(target, x, y, game.camera.zoom, game.grid),
-                false => game.staged.redraw(
-                    target,
-                    x,
-                    y,
-                    game.camera.zoom,
-                    game.grid,
-                    &stale.unwrap_or_default(),
-                ),
-            }
+            let dirty = if moved { None } else { stale.as_deref() };
+            self.zoom_out.draw(game, target, dirty);
             self.painted = look;
         }
         if let Some(ui) = &mut self.ui {
             let map = &self.map;
             let game = self.game.is_some();
-            ui.paint(&mut self.frame, &mut |frame, rect| {
+            let cost = self.game.as_ref().and_then(Game::cost);
+            let developer = self.timers.speed.developer();
+            paint_interface(ui, &mut self.frame, cost, developer, |frame, rect| {
                 if game {
                     copy_rect(frame, map, rect);
                 }
             });
-            // The cost of the pending object or of the brush, next to the pointer (placing 4.5,
-            // terrain editing 7.3).
-            if let Some(amount) = self.game.as_ref().and_then(Game::cost) {
-                let text = place::cost_text(ui.string(SYMBOL), amount);
-                ui.pointer_text(&mut self.frame, &to_cp1252(&text), COST_OFFSET);
-            }
-            if self.timers.speed.developer() {
-                ui.corner_text(&mut self.frame, b"developer mode");
-            }
+            self.zoom_out.compose(game, |sample, source, phase| {
+                paint_interface(ui, sample, cost, developer, |frame, rect| {
+                    zoom_out::copy_sample(source, frame, rect, phase, true);
+                });
+            });
         }
         true
     }
@@ -132,7 +128,10 @@ impl App<'_> {
             // Only the frames of the idle animations moved: no new staging.
             let size = (self.frame.width, self.frame.height);
             let at = (game.camera.scroll, game.camera.zoom);
-            let rects = game.staged.reframe(&want.idle, size, at.0, at.1);
+            let view = self.zoom_out.view(size, at.0, at.1);
+            let rects = game
+                .staged
+                .reframe(&want.idle, view.size, view.origin, view.zoom);
             let drawn = self.painted.is_some()
                 && self.painted == Some((at.0, at.1, game.camera.rotation, game.grid));
             match (drawn, rects) {
@@ -152,8 +151,10 @@ impl App<'_> {
             Ok(staged) => {
                 let old = std::mem::replace(&mut game.staged, staged);
                 // The map drawn for the old staging is mended where the new one differs.
-                let (x, y) = game.camera.scroll;
                 let size = (self.frame.width, self.frame.height);
+                let view = self
+                    .zoom_out
+                    .view(size, game.camera.scroll, game.camera.zoom);
                 let drawn = self.painted.is_some()
                     && self.painted
                         == Some((
@@ -165,7 +166,7 @@ impl App<'_> {
                 let changes = drawn
                     .then(|| {
                         game.staged
-                            .changes(&old, size, (x, y), game.camera.zoom, game.grid)
+                            .changes(&old, view.size, view.origin, view.zoom, game.grid)
                     })
                     .flatten();
                 match changes {
@@ -186,6 +187,24 @@ impl App<'_> {
         self.game
             .as_ref()
             .map(|g| (g.camera.scroll, g.camera.zoom, g.camera.rotation, g.grid))
+    }
+}
+
+fn paint_interface(
+    ui: &mut Interface,
+    frame: &mut Framebuffer,
+    cost: Option<i64>,
+    developer: bool,
+    mut map: impl FnMut(&mut Framebuffer, (i32, i32, i32, i32)),
+) {
+    ui.paint(frame, &mut map);
+    // Pending object or brush cost, next to the pointer.
+    if let Some(amount) = cost {
+        let text = place::cost_text(ui.string(SYMBOL), amount);
+        ui.pointer_text(frame, &to_cp1252(&text), COST_OFFSET);
+    }
+    if developer {
+        ui.corner_text(frame, b"developer mode");
     }
 }
 
