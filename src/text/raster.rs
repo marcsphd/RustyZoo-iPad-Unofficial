@@ -141,6 +141,54 @@ pub(super) fn glyph(
     path.fill()
 }
 
+/// Rasterize at triple density and average coverage back into the original glyph cell.
+pub(super) fn smooth_glyph(
+    outlines: &OutlineGlyphCollection<'_>,
+    id: GlyphId,
+    bold: bool,
+    ppem: u32,
+    advance: i32,
+) -> Glyph {
+    const SAMPLES: i32 = 3;
+    let dense = glyph(
+        outlines,
+        None,
+        id,
+        (bold, ppem * SAMPLES as u32, false),
+        advance * SAMPLES,
+    );
+    if dense.width == 0 || dense.height == 0 {
+        return dense;
+    }
+    let top = dense.bottom + dense.height as i32;
+    let left = dense.left.div_euclid(SAMPLES);
+    let bottom = dense.bottom.div_euclid(SAMPLES);
+    let right = (dense.left + dense.width as i32 + SAMPLES - 1).div_euclid(SAMPLES);
+    let upper = (top + SAMPLES - 1).div_euclid(SAMPLES);
+    let width = (right - left) as usize;
+    let height = (upper - bottom) as usize;
+    let mut sums = vec![0_u16; width * height];
+    for y in 0..dense.height {
+        let row = (upper - 1 - (top - 1 - y as i32).div_euclid(SAMPLES)) as usize;
+        for x in 0..dense.width {
+            let col = ((dense.left + x as i32).div_euclid(SAMPLES) - left) as usize;
+            sums[row * width + col] += u16::from(dense.coverage[y * dense.width + x]);
+        }
+    }
+    let area = (SAMPLES * SAMPLES) as u16;
+    let coverage = sums
+        .into_iter()
+        .map(|sum| ((sum + area / 2) / area) as u8)
+        .collect();
+    Glyph {
+        width,
+        height,
+        left,
+        bottom,
+        coverage,
+    }
+}
+
 /// Line segments of a flattened outline, `(x0, y0, x1, y1)` with y up.
 #[derive(Default)]
 struct Path {

@@ -66,6 +66,10 @@ unsafe extern "C" fn ipad_main(
 extern "C" fn ipad_run(_: std::ffi::c_int, _: *mut *mut std::ffi::c_char) -> std::ffi::c_int {
     sdl3::hint::set("SDL_TOUCH_MOUSE_EVENTS", "0");
     sdl3::hint::set("SDL_MOUSE_TOUCH_EVENTS", "0");
+    // Route Apple Pencil through the same gestures as a finger. SDL otherwise
+    // sends a second, synthetic mouse click for the same contact.
+    sdl3::hint::set("SDL_PEN_TOUCH_EVENTS", "1");
+    sdl3::hint::set("SDL_PEN_MOUSE_EVENTS", "0");
     let documents = match sdl3::filesystem::get_user_folder(sdl3::filesystem::Folder::DOCUMENTS) {
         Ok(dir) => dir,
         Err(error) => {

@@ -110,6 +110,19 @@ fn the_pointer_highlights_the_element_under_it_and_the_map_view_is_not_highlight
 }
 
 #[test]
+fn doubled_ui_hit_targets_preserve_window_coordinates_for_the_map() {
+    let mut ui = interface("double-scale");
+    ui.set_scale((2, 1), 128, 96);
+
+    assert!(!ui.mouse(Mouse::Move(19, 19)));
+    assert_eq!(ui.take_events(), ["hover 20"]);
+    assert!(ui.mouse(Mouse::Move(21, 19)));
+    assert_eq!(ui.pointer(), (21, 19));
+    assert!(ui.mouse(Mouse::Move(127, 95)));
+    assert_eq!(ui.pointer(), (127, 95));
+}
+
+#[test]
 fn a_plain_button_is_pressed_follows_the_pointer_and_acts_on_release_inside() {
     let mut ui = interface("plain");
     ui.mouse(Mouse::Move(3, 3));

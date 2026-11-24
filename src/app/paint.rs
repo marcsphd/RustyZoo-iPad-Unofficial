@@ -36,18 +36,31 @@ impl App<'_> {
         if let Some(ui) = &mut self.ui {
             let map = &self.map;
             let game = self.game.is_some();
+            let ui_scale = interface_scale(game);
             let cost = self.game.as_ref().and_then(Game::cost);
             let developer = self.timers.speed.developer();
-            paint_interface(ui, &mut self.frame, cost, developer, |frame, rect| {
-                if game {
-                    copy_rect(frame, map, rect);
-                }
-            });
-            self.zoom_out.compose(game, |sample, source, phase| {
-                paint_interface(ui, sample, cost, developer, |frame, rect| {
-                    zoom_out::copy_sample(source, frame, rect, phase, true);
+            if ui_scale != (1, 1) {
+                self.zoom_out
+                    .smooth_interface(&mut self.frame, map, ui_scale, |layer| {
+                        let mut map_rect = None;
+                        paint_interface(ui, layer, cost, developer, |_, rect| {
+                            map_rect = Some(rect)
+                        });
+                        map_rect
+                    });
+            } else {
+                paint_interface(ui, &mut self.frame, cost, developer, |frame, rect| {
+                    if game {
+                        copy_rect(frame, map, rect);
+                    }
                 });
-            });
+                self.zoom_out
+                    .compose(game, ui_scale, |sample, source, phase, scale| {
+                        paint_interface(ui, sample, cost, developer, |frame, rect| {
+                            zoom_out::copy_sample(source, frame, rect, phase, scale, true);
+                        });
+                    });
+            }
         }
         true
     }

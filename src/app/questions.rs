@@ -165,6 +165,11 @@ impl App<'_> {
             return;
         };
         self.game = None;
+        ui.set_scale(
+            interface_scale(false),
+            self.frame.width as i32,
+            self.frame.height as i32,
+        );
         ui.clear_messages();
         self.marks.clean(ui);
         (self.painted, self.drawn_at) = (None, None);

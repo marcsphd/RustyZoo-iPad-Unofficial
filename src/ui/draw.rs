@@ -119,6 +119,16 @@ impl Painter {
         map: &mut dyn FnMut(&mut Framebuffer, Rect4),
     ) {
         frame.fill([0, 0, 0, 255]);
+        self.draw_over(tree, frame, strings, map);
+    }
+
+    pub(super) fn draw_over(
+        &mut self,
+        tree: &mut Tree,
+        frame: &mut Framebuffer,
+        strings: &dyn Strings,
+        map: &mut dyn FnMut(&mut Framebuffer, Rect4),
+    ) {
         for i in shown(tree) {
             self.widget(tree, i, frame, strings, map);
         }

@@ -245,6 +245,9 @@ impl Font {
         let (bold, ppem) = (self.bold, self.ppem);
         let advance = i32::from(self.advances[usize::from(byte)]);
         self.glyphs.entry(byte).or_insert_with(|| {
+            if cfg!(target_os = "ios") {
+                return raster::smooth_glyph(&face.outlines, face.id(byte), bold, ppem, advance);
+            }
             let fit = !face.system;
             raster::glyph(
                 &face.outlines,

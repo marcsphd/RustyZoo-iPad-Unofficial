@@ -81,6 +81,7 @@ pub struct Interface {
     /// The first `ZTMapView` of the tree.
     map_view: Option<usize>,
     dirty: bool,
+    scale: (usize, usize),
     /// The mouse: pointer, hover, capture, drag, repeat.
     input: input::Input,
     /// What the interface did in answer to the input since the last [`Interface::take_events`],
@@ -128,6 +129,7 @@ impl Interface {
         }
         let mut ui = Interface {
             tree,
+            scale: (1, 1),
             painter: Painter::default(),
             strings: Texts {
                 base: strings,
@@ -177,6 +179,8 @@ impl Interface {
     /// Resolves every element again for a window of `width` x `height` pixels (the interface
     /// reload of ui layout 3.9, 16.9 point 4.2): the shown state, contents and selections stay.
     pub fn resize(&mut self, width: i32, height: i32) {
+        let size = |extent: i32| self.layout_coordinate(extent.saturating_sub(1)) + 1;
+        let (width, height) = (size(width), size(height));
         let Interface {
             tree,
             painter,
@@ -187,6 +191,21 @@ impl Interface {
             painter.font_named(font, &*strings).line_height()
         });
         self.dirty = true;
+    }
+
+    pub(crate) fn set_scale(&mut self, scale: (usize, usize), width: i32, height: i32) {
+        if self.scale != scale {
+            self.scale = scale;
+            let (x, y) = self.input.window_pointer;
+            self.input.pointer = (self.layout_coordinate(x), self.layout_coordinate(y));
+            self.resize(width, height);
+        }
+    }
+
+    fn layout_coordinate(&self, at: i32) -> i32 {
+        let (numerator, denominator) = self.scale;
+        at.saturating_mul(denominator as i32)
+            .div_euclid(numerator as i32)
     }
 
     /// The colour file the minimap names, if the tree has a minimap.
@@ -309,7 +328,13 @@ impl Interface {
         frame: &mut Framebuffer,
         map: &mut dyn FnMut(&mut Framebuffer, Rect4),
     ) {
-        self.painter.draw(&mut self.tree, frame, &self.strings, map);
+        if self.scale != (1, 1) {
+            frame.fill([0, 0, 0, 0]);
+            self.painter
+                .draw_over(&mut self.tree, frame, &self.strings, map);
+        } else {
+            self.painter.draw(&mut self.tree, frame, &self.strings, map);
+        }
         self.dirty = false;
     }
 
@@ -416,7 +441,7 @@ impl Interface {
 
     /// Where the pointer is, in window pixels, as the last `mouse X Y` put it.
     pub(crate) fn pointer(&self) -> (i32, i32) {
-        self.input.pointer
+        self.input.window_pointer
     }
 
     /// Tells the interface the clock (ms) at which the input that follows happens: a held button

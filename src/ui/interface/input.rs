@@ -21,6 +21,7 @@ struct Drag {
 #[derive(Default)]
 pub(super) struct Input {
     pub(super) pointer: (i32, i32),
+    pub(super) window_pointer: (i32, i32),
     hover: Option<usize>,
     /// The element that gets every mouse message while the left button is held.
     capture: Option<usize>,
@@ -39,7 +40,10 @@ impl Interface {
     /// Applies one mouse message. Returns whether it belongs to the map view.
     pub(crate) fn mouse(&mut self, mouse: Mouse) -> bool {
         match mouse {
-            Mouse::Move(x, y) => self.moved((x, y)),
+            Mouse::Move(x, y) => {
+                self.input.window_pointer = (x, y);
+                self.moved((self.layout_coordinate(x), self.layout_coordinate(y)))
+            }
             Mouse::Down => self.down(),
             Mouse::Up => self.up(),
             Mouse::Double => self.double(),

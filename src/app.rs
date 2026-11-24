@@ -489,6 +489,11 @@ impl<'a> App<'a> {
 
     /// Puts the interface around the game. The window is the size it was resolved for.
     pub fn set_interface(&mut self, mut ui: Interface) {
+        ui.set_scale(
+            interface_scale(self.game.is_some()),
+            self.frame.width as i32,
+            self.frame.height as i32,
+        );
         self.map = Framebuffer::new(self.frame.width, self.frame.height);
         self.painted = None;
         crate::usertext::serve(&mut ui, self.renderer.catalogue());
@@ -720,6 +725,14 @@ mod minimap_bar;
 mod options;
 mod paint;
 mod view_buttons;
+fn interface_scale(in_zoo: bool) -> (usize, usize) {
+    if cfg!(target_os = "ios") && in_zoo {
+        (4, 3)
+    } else {
+        (1, 1)
+    }
+}
+
 mod zoom_out;
 pub use paint::{frame_hash, frame_hashes};
 #[cfg(test)]

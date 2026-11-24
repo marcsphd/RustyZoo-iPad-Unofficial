@@ -69,7 +69,8 @@ fn pass(
     // Which sizes are bilevel follows the weight, as the original's fonts do: bold at 9 and 10
     // pixels per em, regular at 9 to 17; everything else is smoothed.
     let bold = font.is_bold();
-    let bilevel = (9..=if bold { 10 } else { 17 }).contains(&font.ppem());
+    let bilevel =
+        !cfg!(target_os = "ios") && (9..=if bold { 10 } else { 17 }).contains(&font.ppem());
     for (i, line) in layout(font, text, rect.width()).iter().enumerate() {
         let top = rect
             .top
@@ -126,6 +127,8 @@ fn put(
             }
             coverage = if bilevel {
                 if coverage < 128 { 0 } else { 255 }
+            } else if cfg!(target_os = "ios") {
+                coverage
             } else {
                 contrast(coverage)
             };
@@ -134,6 +137,18 @@ fn put(
             }
             let at = (y as usize * width + x as usize) * 4;
             let pixel = &mut target.pixels[at..at + 4];
+            if cfg!(target_os = "ios") && pixel[3] < 255 {
+                let behind = (u32::from(pixel[3]) * (255 - coverage) + 127) / 255;
+                let alpha = coverage + behind;
+                for c in 0..3 {
+                    pixel[c] = ((u32::from(color[c]) * coverage
+                        + u32::from(pixel[c]) * behind
+                        + alpha / 2)
+                        / alpha) as u8;
+                }
+                pixel[3] = alpha as u8;
+                continue;
+            }
             // Mix in 8 bits, then reduce like a text colour.
             let mixed = [0, 1, 2].map(|c| {
                 ((u32::from(pixel[c]) * (255 - coverage) + u32::from(color[c]) * coverage + 127)

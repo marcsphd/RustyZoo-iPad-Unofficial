@@ -177,6 +177,13 @@ impl App<'_> {
             view: Default::default(),
             minimap: None,
         });
+        if let Some(ui) = &mut self.ui {
+            ui.set_scale(
+                interface_scale(true),
+                self.frame.width as i32,
+                self.frame.height as i32,
+            );
+        }
         // The game screen's set-up: running, the pause button shown; the zoom buttons follow the
         // zoom of the file (camera 8.4 point 5, ui layout 7.11 point 4).
         self.pause_to(false);
